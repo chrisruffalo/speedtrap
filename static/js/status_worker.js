@@ -1,3 +1,5 @@
+SESSION_CHECK_INTERVAL = 250;
+
 // global xhr status
 in_progress = null;
 timer = null;
@@ -34,7 +36,7 @@ function check(target) {
       postMessage({"status": true, "response": xhr.response});
 
       // start timer
-      timer = setTimeout(function(){ check(target); }, 750);
+      timer = setTimeout(function(){ check(target); }, SESSION_CHECK_INTERVAL);
     }
   }
 

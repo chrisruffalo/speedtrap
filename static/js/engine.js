@@ -8,8 +8,8 @@ SESSION_KEY_LENGTH = 64; // length of the session key
 
 // sparkline global options
 sparkOpts = {
-  width: "40%",
-  height: "38px"
+  width: "38%",
+  height: "35px"
 };
 
 // essentially pools for the workers
@@ -218,8 +218,10 @@ function dispatchStatus(sessionKey, response) {
       $('#downloadChartSpan').sparkline(downloadBytesPerSecondTally, sparkOpts);
     }
     lastDownloadEnd = response.downloadEnd;
-    humanReadable = humanFileSize(bytesPerSecond, true) + "ps";
+    humanReadable = humanByteSize(bytesPerSecond, true) + "/s";
     $("#downloadSpan").text(humanReadable);
+    humanReadableBits = "(" + humanBitSize(bytesPerSecond * 8, true) + "ps)";
+    $("#downloadBitSpan").text(humanReadableBits);
   }
 
   if(response.uploadStart && response.uploadEnd && response.uploadCount) {
@@ -230,8 +232,10 @@ function dispatchStatus(sessionKey, response) {
       $('#uploadChartSpan').sparkline(uploadBytesPerSecondTally, sparkOpts);
     }
     lastUploadEnd = response.uploadEnd;
-    humanReadable = humanFileSize(bytesPerSecond, true) + "ps";
+    humanReadable = humanByteSize(bytesPerSecond, true) + "/s";
     $("#uploadSpan").text(humanReadable);
+    humanReadableBits = "(" + humanBitSize(bytesPerSecond * 8, true) + "ps)";
+    $("#uploadBitSpan").text(humanReadableBits);
   }
 }
 
@@ -279,7 +283,9 @@ function reset() {
   // clear display segments
   $('#pingSpan').html("&nbsp;");
   $('#downloadSpan').html("&nbsp;");
+  $('#downloadBitSpan').html("&nbsp;");
   $('#uploadSpan').html("&nbsp;");
+  $('#uploadBitSpan').html("&nbsp;");
 
   // clear display spans
   $('#pingChartSpan').html("&nbsp;");
