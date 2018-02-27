@@ -183,6 +183,11 @@ function stopTest() {
 }
 
 function pingUpdate(pingTimes) {
+  // don't mess with empty ping time list
+  if(!pingTimes || pingTimes.length < 1) {
+    return;
+  }
+
   // get average ping
   sum = pingTimes.reduce(function(a, b){ return a + b;});
   avg = (sum / pingTimes.length); // convert microseconds to milliseconds
