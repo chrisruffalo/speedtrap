@@ -1,6 +1,8 @@
 // how big of an entropy block the random function can provide
 MAX_PROVIDER_ARRAY = 65536;
-UPLOAD_BYTES = 5120000;
+UPLOAD_BYTES = 5000000; // counter-intuitive but larger arrays produce better results in general because the call stack can't slam itself
+                        // having finished workers call new workers might not be the best idea because if they complete too often it will
+                        // cause a failure when the recursive calls pile up.
 
 // pool of downloaders
 uploaders = [];
@@ -19,6 +21,9 @@ onmessage = function(event) {
     // terminate worker
     close();
   } else if (message.target) {
+    // say good to start countown
+    postMessage({"started": true});
+
     target = message.target;
     for(i = 0; i < message.threads; i++) {
       // start upload
@@ -69,7 +74,7 @@ function upload(target, thread) {
     }
 
     // done uploading
-    if(xhr.status >= 200 && xhr.status < 300) {
+    if(xhr.readyState === 4) {
       upload(target, thread);
     }
   }

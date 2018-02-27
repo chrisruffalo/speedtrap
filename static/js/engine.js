@@ -147,26 +147,29 @@ function doTest_Download(sessionKey) {
 function doTest_Upload(sessionKey) {
   console.log("Starting upload portion for " + sessionKey)
   // start uploaders
-  spawnUploaders(sessionKey);
+  worker = spawnUploaders(sessionKey);
 
-  // kill uploaders after time interval
-  timer = window.setTimeout(function() {
-    // handle worker shutdown
-    console.log("Stopping uploaders...");
-    terminateWorkers(uploadWorkers);
+  // wait until worker actually starts to begin window
+  worker.onmessage = function(event) {
+    // kill uploaders after time interval
+    timer = window.setTimeout(function() {
+      // handle worker shutdown
+      console.log("Stopping uploaders...");
+      terminateWorkers(uploadWorkers);
 
-    // chain to upload portion
-    stopTest(sessionKey);
-  }, DOWNLOAD_TEST_INTERVAL_S * 1000);
-  timers.push(timer);
+      // chain to upload portion
+      stopTest(sessionKey);
+    }, DOWNLOAD_TEST_INTERVAL_S * 1000);
+    timers.push(timer);
 
-  // kill status 5% after upload time kill
-  timer = window.setTimeout(function() {
-    // handle worker shutdown
-    console.log("Stopping status...");
-    terminateWorkers(statusWorkers);
-  }, (DOWNLOAD_TEST_INTERVAL_S * 1.05) * 1000);
-  timers.push(timer);
+    // kill status 5% after upload time kill
+    timer = window.setTimeout(function() {
+      // handle worker shutdown
+      console.log("Stopping status...");
+      terminateWorkers(statusWorkers);
+    }, (DOWNLOAD_TEST_INTERVAL_S * 1.05) * 1000);
+    timers.push(timer);
+  }
 }
 
 function stopTest() {

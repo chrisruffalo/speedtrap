@@ -1,6 +1,6 @@
 // how much the bytes should grow each time
 DOWNLOAD_GROW_FACTOR = 4;
-MAX_BYTES = 20480000;
+MAX_BYTES = 10240000;
 
 // pool of downloaders
 downloaders = [];
