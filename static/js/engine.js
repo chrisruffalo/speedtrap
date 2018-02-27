@@ -1,9 +1,16 @@
 // constants
-WORKER_THREADS = 2;
-START_DOWNLOAD_BYTES = 128000;
-DOWNLOAD_TEST_INTERVAL_S = 15;
-UPLOAD_TEST_INTERVAL_S = 15;
+DOWNLOAD_WORKER_THREADS = 4;
+UPLOAD_WORKER_THREADS = 4;
+START_DOWNLOAD_BYTES = 1024000;
+DOWNLOAD_TEST_INTERVAL_S = 11;
+UPLOAD_TEST_INTERVAL_S = 11;
 SESSION_KEY_LENGTH = 64; // length of the session key
+
+// sparkline global options
+sparkOpts = {
+  width: "40%",
+  height: "38px"
+};
 
 // essentially pools for the workers
 downloadWorkers = [];
@@ -33,20 +40,16 @@ function spawnWorker(pool, script) {
   return worker;
 }
 
-async function spawnDownloaders(sessionKey, bytes) {
-  if(!bytes || bytes < START_DOWNLOAD_BYTES) {
-    bytes = START_DOWNLOAD_BYTES
-  }
-  for(i = 0; i < WORKER_THREADS; i++) {
-    worker = spawnWorker(downloadWorkers, "js/download_worker.js?thread=" + i);
-    worker.postMessage({"target": "/data/" + sessionKey, "bytes": START_DOWNLOAD_BYTES, "thread": i});
-    await sleep(1 / WORKER_THREADS); // stagger start over the course of one second
-  }
+function spawnDownloaders(sessionKey) {
+  worker = spawnWorker(downloadWorkers, "js/download_worker.js");
+  worker.postMessage({"target": "/data/" + sessionKey, "bytes": START_DOWNLOAD_BYTES, "threads": DOWNLOAD_WORKER_THREADS});
   return worker;
 }
 
-function spawnUploader() {
-  spawnWorker(uploaders, "js/upload_worker.js", []);
+function spawnUploaders(sessionKey) {
+  worker = spawnWorker(uploadWorkers, "js/upload_worker.js");
+  worker.postMessage({"target": "/upload/" + sessionKey, "threads": UPLOAD_WORKER_THREADS});
+  return worker;
 }
 
 sessionKey = null;
@@ -62,6 +65,7 @@ function doTest() {
 
   sessionKey = newSessionKey();
   //console.log("Got sessionKey: " + sessionKey);
+  console.log("Starting ping portion for " + sessionKey)
 
   // do ping, display result
   socket = new WebSocket("ws://localhost:8000/ws");
@@ -108,6 +112,10 @@ function doTest() {
 }
 
 function doTest_Download(sessionKey) {
+  // start download test
+  console.log("Starting download portion for " + sessionKey)
+  spawnDownloaders(sessionKey);
+
   // start status watcher
   worker = spawnWorker(statusWorkers, "js/status_worker.js");
   // start process
@@ -119,10 +127,6 @@ function doTest_Download(sessionKey) {
       dispatchStatus(sessionKey, event.data.response);
     }
   }
-
-  // start download test
-  console.log("Starting download portion for " + sessionKey)
-  spawnDownloaders(sessionKey, START_DOWNLOAD_BYTES);
 
   // kill downloaders after time interval
   timer = window.setTimeout(function() {
@@ -137,7 +141,9 @@ function doTest_Download(sessionKey) {
 }
 
 function doTest_Upload(sessionKey) {
+  console.log("Starting upload portion for " + sessionKey)
   // start uploaders
+  spawnUploaders(sessionKey);
 
   // kill uploaders after time interval
   timer = window.setTimeout(function() {
@@ -150,18 +156,18 @@ function doTest_Upload(sessionKey) {
   }, DOWNLOAD_TEST_INTERVAL_S * 1000);
   timers.push(timer);
 
-  // kill status 25% after upload time kill
+  // kill status 5% after upload time kill
   timer = window.setTimeout(function() {
     // handle worker shutdown
     console.log("Stopping status...");
     terminateWorkers(statusWorkers);
-  }, (DOWNLOAD_TEST_INTERVAL_S * 1.25) * 1000);
+  }, (DOWNLOAD_TEST_INTERVAL_S * 1.05) * 1000);
   timers.push(timer);
 }
 
 function stopTest() {
   // clear session from server
-  clearSession(sessionKey);
+  // clearSession(sessionKey); // maybe do this after some time?
   sessionKey = null;
 
   // fix button state
@@ -173,13 +179,15 @@ function pingUpdate(pingTimes) {
   // get average ping
   sum = pingTimes.reduce(function(a, b){ return a + b;});
   avg = (sum / pingTimes.length); // convert microseconds to milliseconds
-  $('#pingChartSpan').sparkline(pingTimes, {width: "45%", height: "40px"});
+  $('#pingChartSpan').sparkline(pingTimes, sparkOpts);
   $("#pingSpan").text(avg.toFixed(4) + "ms");
 }
 
 // keep track for sparklines
-bytesPerSecondTally = [];
+downloadBytesPerSecondTally = [];
+uploadBytesPerSecondTally = [];
 lastDownloadEnd = 0;
+lastUploadEnd = 0;
 function dispatchStatus(sessionKey, response) {
   // bail on null status
   if(!response || response == null || "null" == response || response.startsWith("null")) {
@@ -194,12 +202,24 @@ function dispatchStatus(sessionKey, response) {
     // times delivered are in milliseconds
     bytesPerSecond = Math.floor(response.downloadCount / ((response.downloadEnd - response.downloadStart) / 1000));
     if(lastDownloadEnd < response.downloadEnd) {
-      bytesPerSecondTally.push(bytesPerSecond);
-      $('#downloadChartSpan').sparkline(bytesPerSecondTally, {width: "45%", height: "40px"});
+      downloadBytesPerSecondTally.push(bytesPerSecond);
+      $('#downloadChartSpan').sparkline(downloadBytesPerSecondTally, sparkOpts);
     }
     lastDownloadEnd = response.downloadEnd;
     humanReadable = humanFileSize(bytesPerSecond, true) + "ps";
     $("#downloadSpan").text(humanReadable);
+  }
+
+  if(response.uploadStart && response.uploadEnd && response.uploadCount) {
+    // times delivered are in milliseconds
+    bytesPerSecond = Math.floor(response.uploadCount / ((response.uploadEnd - response.uploadStart) / 1000));
+    if(lastUploadEnd < response.uploadEnd) {
+      uploadBytesPerSecondTally.push(bytesPerSecond);
+      $('#uploadChartSpan').sparkline(uploadBytesPerSecondTally, sparkOpts);
+    }
+    lastUploadEnd = response.uploadEnd;
+    humanReadable = humanFileSize(bytesPerSecond, true) + "ps";
+    $("#uploadSpan").text(humanReadable);
   }
 }
 
@@ -239,12 +259,15 @@ function reset() {
   timers = [];
 
   // clear other values/variables
-  bytesPerSecondTally = [];
+  downloadBytesPerSecondTally = [];
+  uploadBytesPerSecondTally = []
   lastDownloadEnd = 0;
+  lastUploadEnd = 0;
 
   // clear display spans
   $('#pingChartSpan').html("&nbsp;");
   $('#downloadChartSpan').html("&nbsp;");
+  $('#uploadChartSpan').html("&nbsp;");
 
   // activate start button, deactivate cancel button
   $("#startButton").prop("disabled", false);

@@ -1,8 +1,11 @@
 package main
 
 import (
+	//"fmt"
 	"bufio"
 	"encoding/json"
+	"io"
+	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
@@ -11,14 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dustin/randbo"
 	"github.com/gobuffalo/packr"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
-
-// how many times to reuse the buffer
-const bufferFactor = 128
 
 type msg struct {
 	Num int
@@ -27,6 +26,8 @@ type msg struct {
 // status struct
 type status struct {
 	UploadByteCount   uint64 `json:"uploadCount,omitempty"`
+	UploadStart       uint64 `json:"uploadStart,omitempty"`
+	UploadEnd         uint64 `json:"uploadEnd,omitempty"`
 	DownloadByteCount uint64 `json:"downloadCount,omitempty"`
 	DownloadStart     uint64 `json:"downloadStart,omitempty"`
 	DownloadEnd       uint64 `json:"downloadEnd,omitempty"`
@@ -35,9 +36,10 @@ type status struct {
 // map of session statuses
 var statusMap = make(map[string]*status)
 
-// source
+// source for random values
 var randSource = rand.New(rand.NewSource(time.Now().Unix()))
 
+// mutex for protecting status creation/retrieval
 var statusMutex = &sync.Mutex{}
 
 func getSessionStatus(sessionID string, create bool) (*status, bool) {
@@ -61,6 +63,7 @@ func getSessionStatus(sessionID string, create bool) (*status, bool) {
 	// if session not found and create is required, create new
 	errorFinding := true
 	if create {
+		log.Printf("Created new session %s", sessionID)
 		errorFinding = false
 		sessionStatus = &status{}
 		statusMap[sessionID] = sessionStatus
@@ -85,19 +88,23 @@ func getData(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// log session and byte request
-	log.Printf("Get data request for session %s (%d bytes)", sessionID, reqBytes)
+	//log.Printf("Get data request for session %s (%d bytes)", sessionID, reqBytes)
 
 	// start writing headers to prevent any attempt at caching
 	w.Header().Add("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Add("Content-Type", "application/octet-stream")
 
 	// send random stream of bytes, should be larger than compression windows on most hardware
-	buffer := make([]byte, 4194304)
+	bufSize := 4194304
+	if reqBytes < int64(bufSize) {
+		bufSize = int(reqBytes)
+	}
+	buffer := make([]byte, bufSize)
 
 	bufW := bufio.NewWriter(w)
-	bufR := bufio.NewReader(randbo.New())
 
-	// populate buffer
-	bufR.Read(buffer)
+	// populate reusable buffer
+	rand.Read(buffer)
 
 	// start clock at very first read and don't change later
 	atomic.CompareAndSwapUint64(&sessionStatus.DownloadStart, 0, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
@@ -120,6 +127,9 @@ func getData(w http.ResponseWriter, r *http.Request) {
 
 		// adjust waiting bytes
 		reqBytes -= int64(writtenBytes)
+
+		// fkyst writer
+		bufW.Flush()
 	}
 
 }
@@ -127,28 +137,37 @@ func getData(w http.ResponseWriter, r *http.Request) {
 func getUpload(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	sessionID := params["sessionID"]
-	log.Printf("Upload request for session %s", sessionID)
+	//log.Printf("Upload request for session %s", sessionID)
 	// get session status
 	sessionStatus, _ := getSessionStatus(sessionID, true)
 
-	// just an attempt at the buffer size, probably need to do better here
-	var buffer = make([]byte, 4194304)
+	// start clock at very first write and don't change later
+	atomic.CompareAndSwapUint64(&sessionStatus.UploadStart, 0, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
+
+	// need a buffer for metered progress
+	//buffer := make([]byte, 32000)
+	var copyLen int64 = 32000
 
 	// dilligently read and discard everything
 	for true {
-		readBytes, err := r.Body.Read(buffer)
+		readBytes, err := io.CopyN(ioutil.Discard, r.Body, copyLen)
 		if readBytes < 1 || err != nil {
 			break
 		}
 		// count uploaded bytes
 		atomic.AddUint64(&sessionStatus.UploadByteCount, uint64(readBytes))
+		// clock should always be latest value of time
+		atomic.StoreUint64(&sessionStatus.UploadEnd, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
 	}
+
+	// respond with ok message
+	w.Write([]byte("ok"))
 }
 
 func getStatus(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	sessionID := params["sessionID"]
-	log.Printf("Status request for session %s", sessionID)
+	//log.Printf("Status request for session %s", sessionID)
 	if sessionStatus, ok := getSessionStatus(sessionID, false); ok {
 		json.NewEncoder(w).Encode(sessionStatus)
 	} else {

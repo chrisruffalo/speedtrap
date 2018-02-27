@@ -1,5 +1,6 @@
 // how much the bytes should grow each time
 DOWNLOAD_GROW_FACTOR = 4;
+MAX_BYTES = 20480000;
 
 // pool of downloaders
 downloaders = [];
@@ -13,19 +14,24 @@ onmessage = function(event) {
       xhr = downloaders[i];
       xhr.abort();
       xhr[i] = null;
-      console.log("Shut down XHR request");
+      console.log("Shut down download XHR request");
     }
     // terminate worker
     close();
   } else if (message.target && message.bytes) {
     target = message.target;
     bytes = message.bytes;
-    thread = message.thread;
-    download(target, bytes, thread);
+    threads = message.threads;
+    for(i = 0; i < threads; i++) {
+      download(target, bytes, i);
+    }
   }
 };
 
 function download(target, bytes, thread) {
+  if(bytes > MAX_BYTES) {
+    bytes = MAX_BYTES;
+  }
   //console.log("starting new download on thread " + thread + " with byte size " + bytes);
 
   // not going to bother with older browsers
@@ -44,6 +50,7 @@ function download(target, bytes, thread) {
   }
 
   // open url with byte target
+  xhr.responseType = "arraybuffer";
   xhr.open('GET', target + "?bytes=" + bytes + "&timestamp=" + Date.now(), true);
-  xhr.send();
+  xhr.send(null);
 }
