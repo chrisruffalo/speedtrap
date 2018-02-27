@@ -9,6 +9,7 @@ SESSION_KEY_LENGTH = 64; // length of the session key
 downloadWorkers = [];
 uploadWorkers = [];
 statusWorkers = [];
+timers = [];
 
 function newSessionKey() {
   return Array.apply(null, Array(SESSION_KEY_LENGTH)).map(pickRandom).join('');
@@ -48,9 +49,20 @@ function spawnUploader() {
   spawnWorker(uploaders, "js/upload_worker.js", []);
 }
 
+sessionKey = null;
+interval = null;
+socket = null;
 function doTest() {
+  // do this juuuusssst in case
+  reset();
+
+  // deactivate start button and activate cancel button
+  $("#startButton").prop("disabled", true);
+  $("#cancelButton").prop("disabled", false);
+
   sessionKey = newSessionKey();
-  console.log("Got sessionKey: " + sessionKey);
+  //console.log("Got sessionKey: " + sessionKey);
+
   // do ping, display result
   socket = new WebSocket("ws://localhost:8000/ws");
   startTime = 0;
@@ -75,12 +87,16 @@ function doTest() {
   // update ping times
   interval = window.setInterval(function() {
     pingUpdate(pingTimes);
-  }, 750);
+  }, 250);
 
   // after interval stop web socket and show ping
-  window.setTimeout(function() {
+  timer = window.setTimeout(function() {
     // cancel update interval
     window.clearInterval(interval);
+    interval = null;
+
+    // empty pingTimes
+    pingTimes = [];
 
     // close ws
     socket.close();
@@ -88,6 +104,7 @@ function doTest() {
     // chain to download portion
     doTest_Download(sessionKey);
   }, 5000);
+  timers.push(timer);
 }
 
 function doTest_Download(sessionKey) {
@@ -108,7 +125,7 @@ function doTest_Download(sessionKey) {
   spawnDownloaders(sessionKey, START_DOWNLOAD_BYTES);
 
   // kill downloaders after time interval
-  window.setTimeout(function() {
+  timer = window.setTimeout(function() {
     // handle worker shutdown
     console.log("Stopping downloaders...");
     terminateWorkers(downloadWorkers);
@@ -116,29 +133,53 @@ function doTest_Download(sessionKey) {
     // chain to upload portion
     doTest_Upload(sessionKey);
   }, DOWNLOAD_TEST_INTERVAL_S * 1000);
+  timers.push(timer);
 }
 
 function doTest_Upload(sessionKey) {
   // start uploaders
 
   // kill uploaders after time interval
+  timer = window.setTimeout(function() {
+    // handle worker shutdown
+    console.log("Stopping uploaders...");
+    terminateWorkers(uploadWorkers);
+
+    // chain to upload portion
+    stopTest(sessionKey);
+  }, DOWNLOAD_TEST_INTERVAL_S * 1000);
+  timers.push(timer);
 
   // kill status 25% after upload time kill
-  window.setTimeout(function() {
+  timer = window.setTimeout(function() {
     // handle worker shutdown
     console.log("Stopping status...");
     terminateWorkers(statusWorkers);
   }, (DOWNLOAD_TEST_INTERVAL_S * 1.25) * 1000);
+  timers.push(timer);
+}
+
+function stopTest() {
+  // clear session from server
+  clearSession(sessionKey);
+  sessionKey = null;
+
+  // fix button state
+  $("#startButton").prop("disabled", false);
+  $("#cancelButton").prop("disabled", true);
 }
 
 function pingUpdate(pingTimes) {
   // get average ping
   sum = pingTimes.reduce(function(a, b){ return a + b;});
   avg = (sum / pingTimes.length); // convert microseconds to milliseconds
-  pingTimes = [];
-  document.getElementById("pingSpan").textContent = avg.toFixed(4) + "ms";
+  $('#pingChartSpan').sparkline(pingTimes, {width: "45%", height: "40px"});
+  $("#pingSpan").text(avg.toFixed(4) + "ms");
 }
 
+// keep track for sparklines
+bytesPerSecondTally = [];
+lastDownloadEnd = 0;
 function dispatchStatus(sessionKey, response) {
   // bail on null status
   if(!response || response == null || "null" == response || response.startsWith("null")) {
@@ -152,7 +193,69 @@ function dispatchStatus(sessionKey, response) {
   if(response.downloadStart && response.downloadEnd && response.downloadCount) {
     // times delivered are in milliseconds
     bytesPerSecond = Math.floor(response.downloadCount / ((response.downloadEnd - response.downloadStart) / 1000));
+    if(lastDownloadEnd < response.downloadEnd) {
+      bytesPerSecondTally.push(bytesPerSecond);
+      $('#downloadChartSpan').sparkline(bytesPerSecondTally, {width: "45%", height: "40px"});
+    }
+    lastDownloadEnd = response.downloadEnd;
     humanReadable = humanFileSize(bytesPerSecond, true) + "ps";
-    document.getElementById("downloadSpan").textContent = humanReadable;
+    $("#downloadSpan").text(humanReadable);
   }
+}
+
+// resets every concievable variable
+// and state of the form and just about
+// anything you can immagine (timers, etc)
+// so that everything can be started again
+function reset() {
+  if(sessionKey) {
+    clearSession(sessionKey);
+    sessionKey = null;
+  }
+
+  // first, terminate workers
+  terminateWorkers(downloadWorkers);
+  terminateWorkers(uploadWorkers);
+  terminateWorkers(statusWorkers);
+
+  // close web socket
+  if(socket) {
+    socket.close();
+  }
+
+  // stop update interval
+  if(interval) {
+    window.clearInterval(interval);
+    interval = null;
+  }
+
+  // clear all timers
+  for(i in timers) {
+    timer = timers[i];
+    if(timer) {
+      window.clearTimeout(timer);
+    }
+  }
+  timers = [];
+
+  // clear other values/variables
+  bytesPerSecondTally = [];
+  lastDownloadEnd = 0;
+
+  // clear display spans
+  $('#pingChartSpan').html("&nbsp;");
+  $('#downloadChartSpan').html("&nbsp;");
+
+  // activate start button, deactivate cancel button
+  $("#startButton").prop("disabled", false);
+  $("#cancelButton").prop("disabled", true);
+}
+
+function clearSession(sessionKey) {
+  // not going to bother with older browsers
+  xhr = new XMLHttpRequest();
+
+  // open url with delete/clear target
+  xhr.open('DELETE', '/clear/' + sessionKey + "?timestamp=" + Date.now(), true);
+  xhr.send();
 }

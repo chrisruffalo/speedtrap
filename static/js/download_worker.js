@@ -26,7 +26,7 @@ onmessage = function(event) {
 };
 
 function download(target, bytes, thread) {
-  console.log("starting new download on thread " + thread + " with byte size " + bytes);
+  //console.log("starting new download on thread " + thread + " with byte size " + bytes);
 
   // not going to bother with older browsers
   xhr = new XMLHttpRequest();

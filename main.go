@@ -71,11 +71,6 @@ func getSessionStatus(sessionID string, create bool) (*status, bool) {
 	return sessionStatus, errorFinding
 }
 
-func ping(w http.ResponseWriter, r *http.Request) {
-	params := mux.Vars(r)
-	log.Printf("Ping for session %s", params["sessionID"])
-}
-
 func getData(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	sessionID := params["sessionID"]
@@ -167,6 +162,7 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	sessionID := params["sessionID"]
 	if _, ok := getSessionStatus(sessionID, false); ok {
 		delete(statusMap, sessionID)
+		log.Printf("Removed session for %s", sessionID)
 	} else {
 		// 404 response code if no status found
 		w.WriteHeader(404)
@@ -202,22 +198,19 @@ func handleWsConn(conn *websocket.Conn) {
 func main() {
 	router := mux.NewRouter()
 
-	// ping
-	router.HandleFunc("/ping/{sessionID}", ping).Methods("GET")
-
-	// get data
+	// get bytes of data from the server
 	router.HandleFunc("/data/{sessionID}", getData).Methods("GET")
 
-	// send data
+	// send data (which is counted and discarded)
 	router.HandleFunc("/upload/{sessionID}", getUpload).Methods("PUT", "POST")
 
-	// get status
+	// get status of upload/downloads
 	router.HandleFunc("/status/{sessionID}", getStatus).Methods("GET")
 
-	// clear status
+	// clear status/session manually
 	router.HandleFunc("/clear/{sessionID}", clearStatus).Methods("DELETE")
 
-	// websocket
+	// websocket for ping/pong connections
 	router.HandleFunc("/ws", wsHandler)
 
 	// handle static files, no idea why fileserver doesn't work with the box righ there but it won't so
