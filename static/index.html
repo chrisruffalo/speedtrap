@@ -7,18 +7,22 @@
     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/flexboxgrid/6.3.1/flexboxgrid.min.css" type="text/css" >
   </head>
   <body>
-    <div class="row">
-      <div class="col-xs-12 col-md-6 col-lg-4">
-        Ping: <span id="pingSpan"/>
+    <center>
+      <div class="row" style="width: 80%;">
+        <div class="col-xs-12 col-md-6 col-lg-4">
+          <h3>Ping</h3> <span id="pingSpan"/>
+        </div>
+        <div class="col-xs-12 col-md-6 col-lg-4">
+          <h3>Download</h3> <span id="downloadSpan"/>
+        </div>
+        <div class="col-xs-12 col-md-6 col-lg-4">
+          <h3>Upload</h3> <span id="uploadSpan"/>
+        </div>
       </div>
-      <div class="col-xs-12 col-md-6 col-lg-4">
-        Download: <span id="downloadSpan"/>
-      </div>
-      <div class="col-xs-12 col-md-6 col-lg-4">
-        Upload: <span id="uploadSpan"/>
-      </div>
-    </div>
+    </center>
 
+    <br/>
+    <br/>
     <center>
       <button onclick="doTest()">Start Test</button>
     </center>
