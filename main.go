@@ -1,7 +1,8 @@
 package main
 
 import (
-	//"fmt"
+	"fmt"
+	"flag"
 	"bufio"
 	"encoding/json"
 	"io"
@@ -247,6 +248,16 @@ func main() {
 		w.Write(box.Bytes(path))
 	})
 
+	var host = flag.String("host", "127.0.0.1", "Host to serve traffic on")
+	var port = flag.Int("port", 9922, "Port to serve traffic on" )
+	flag.Parse()
+
+	// set host and port
+	hostAndPort := fmt.Sprintf("%s:%d", *host, *port)
+
+	// log traffic location
+	log.Printf("Serving traffic on %s", hostAndPort)
+
 	// log exit reason
-	log.Fatal(http.ListenAndServe(":8000", router))
+	log.Fatal(http.ListenAndServe(hostAndPort, router))
 }

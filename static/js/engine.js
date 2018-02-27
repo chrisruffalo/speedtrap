@@ -68,7 +68,11 @@ function doTest() {
   console.log("Starting ping portion for " + sessionKey)
 
   // do ping, display result
-  socket = new WebSocket("ws://localhost:8000/ws");
+  socketType = "ws";
+  if(window.location.href.startsWith("https")) {
+    socketType = "wss";
+  }
+  socket = new WebSocket(socketType + "://" + location.hostname + ":" + location.port + "/ws");
   startTime = 0;
   endTime = 0;
   pingTimes = [];
