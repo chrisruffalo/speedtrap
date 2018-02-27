@@ -2,7 +2,8 @@ FROM golang:1.9
 
 # set up working dir and copy local project
 WORKDIR /go/src/speedtrap
-COPY . .
+COPY *.go .
+COPY static ./static
 
 # get all deps
 RUN go get -d -v ./...
