@@ -14,10 +14,15 @@ import (
 	"github.com/dustin/randbo"
 	"github.com/gobuffalo/packr"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 )
 
 // how many times to reuse the buffer
 const bufferFactor = 128
+
+type msg struct {
+	Num int
+}
 
 // status struct
 type status struct {
@@ -168,6 +173,32 @@ func clearStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func wsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Origin") != "http://"+r.Host {
+		http.Error(w, "Origin not allowed", 403)
+		return
+	}
+	conn, err := websocket.Upgrade(w, r, w.Header(), 1024, 1024)
+	if err != nil {
+		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+	}
+
+	go handleWsConn(conn)
+}
+
+func handleWsConn(conn *websocket.Conn) {
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+
+		//log.Print("got ping from client")
+
+		conn.WriteMessage(websocket.TextMessage, []byte("p"))
+	}
+}
+
 func main() {
 	router := mux.NewRouter()
 
@@ -185,6 +216,9 @@ func main() {
 
 	// clear status
 	router.HandleFunc("/clear/{sessionID}", clearStatus).Methods("DELETE")
+
+	// websocket
+	router.HandleFunc("/ws", wsHandler)
 
 	// handle static files, no idea why fileserver doesn't work with the box righ there but it won't so
 	// we make this strange contraption to get it to work

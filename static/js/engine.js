@@ -52,7 +52,45 @@ function doTest() {
   sessionKey = newSessionKey();
   console.log("Got sessionKey: " + sessionKey);
   // do ping, display result
+  socket = new WebSocket("ws://localhost:8000/ws");
+  startTime = 0;
+  endTime = 0;
+  pingTimes = [];
 
+  // when the socket is opened start the timer and send a small message
+  socket.onopen = function() {
+    startTime = window.performance.now();
+    socket.send("p"); // any short message will do
+  }
+
+  // when a message is rec'd record the time and send a new one
+  socket.onmessage = function() {
+    endTime = window.performance.now();
+    elapsed = (1.0 * (endTime - startTime))/ 2.0;
+    pingTimes.push(elapsed);
+    startTime = window.performance.now();
+    socket.send("p");
+  }
+
+  // update ping times
+  interval = window.setInterval(function() {
+    pingUpdate(pingTimes);
+  }, 750);
+
+  // after interval stop web socket and show ping
+  window.setTimeout(function() {
+    // cancel update interval
+    window.clearInterval(interval);
+
+    // close ws
+    socket.close();
+
+    // chain to download portion
+    doTest_Download(sessionKey);
+  }, 5000);
+}
+
+function doTest_Download(sessionKey) {
   // start status watcher
   worker = spawnWorker(statusWorkers, "js/status_worker.js");
   // start process
@@ -65,11 +103,6 @@ function doTest() {
     }
   }
 
-  // chain to download portion
-  doTest_Download(sessionKey);
-}
-
-function doTest_Download(sessionKey) {
   // start download test
   console.log("Starting download portion for " + sessionKey)
   spawnDownloaders(sessionKey, START_DOWNLOAD_BYTES);
@@ -96,6 +129,14 @@ function doTest_Upload(sessionKey) {
     console.log("Stopping status...");
     terminateWorkers(statusWorkers);
   }, (DOWNLOAD_TEST_INTERVAL_S * 1.25) * 1000);
+}
+
+function pingUpdate(pingTimes) {
+  // get average ping
+  sum = pingTimes.reduce(function(a, b){ return a + b;});
+  avg = (sum / pingTimes.length); // convert microseconds to milliseconds
+  pingTimes = [];
+  document.getElementById("pingSpan").textContent = avg.toFixed(4) + "ms";
 }
 
 function dispatchStatus(sessionKey, response) {
