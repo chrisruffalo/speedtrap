@@ -20,9 +20,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type msg struct {
-	Num int
-}
+// constrain this so people don't go nuts on the server
+const _MAX_DOWNLOAD_BYTES = 24000000
 
 // status struct
 type status struct {
@@ -87,6 +86,9 @@ func getData(w http.ResponseWriter, r *http.Request) {
 	if convErr != nil {
 		return
 	}
+	if reqBytes > _MAX_DOWNLOAD_BYTES {
+		reqBytes = _MAX_DOWNLOAD_BYTES
+	}
 
 	// log session and byte request
 	//log.Printf("Get data request for session %s (%d bytes)", sessionID, reqBytes)
@@ -145,8 +147,7 @@ func getUpload(w http.ResponseWriter, r *http.Request) {
 	// start clock at very first write and don't change later
 	atomic.CompareAndSwapUint64(&sessionStatus.UploadStart, 0, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
 
-	// need a buffer for metered progress
-	//buffer := make([]byte, 32000)
+	// copy interval because if we just read all the bytes we never get around to updating the session
 	var copyLen int64 = 32000
 
 	// dilligently read and discard everything
