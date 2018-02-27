@@ -1,6 +1,6 @@
 // constants
-DOWNLOAD_WORKER_THREADS = 4;
-UPLOAD_WORKER_THREADS = 4;
+DOWNLOAD_WORKER_THREADS = 2;
+UPLOAD_WORKER_THREADS = 2;
 START_DOWNLOAD_BYTES = 1024000;
 DOWNLOAD_TEST_INTERVAL_S = 11;
 UPLOAD_TEST_INTERVAL_S = 11;
@@ -275,6 +275,11 @@ function reset() {
   uploadBytesPerSecondTally = []
   lastDownloadEnd = 0;
   lastUploadEnd = 0;
+
+  // clear display segments
+  $('#pingSpan').html("&nbsp;");
+  $('#downloadSpan').html("&nbsp;");
+  $('#uploadSpan').html("&nbsp;");
 
   // clear display spans
   $('#pingChartSpan').html("&nbsp;");
