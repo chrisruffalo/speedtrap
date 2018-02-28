@@ -1,60 +1,86 @@
-// constants
-DOWNLOAD_WORKER_THREADS = 2;
-UPLOAD_WORKER_THREADS = 2;
-START_DOWNLOAD_BYTES = 1024000;
-DOWNLOAD_TEST_INTERVAL_S = 11;
-UPLOAD_TEST_INTERVAL_S = 11;
-SESSION_KEY_LENGTH = 64; // length of the session key
-
-// sparkline global options
-sparkOpts = {
-  width: "38%",
-  height: "35px"
-};
-
-// essentially pools for the workers
-downloadWorkers = [];
-uploadWorkers = [];
-statusWorkers = [];
+// timer pool
 timers = [];
 
+// resume callback allows us to do something after termination
+resumeCallback = null;
+
+function spawnWorker() {
+  worker = new Worker("js/worker.js");
+  worker.onmessage = function(event) {
+    message = event.data
+    if(!message) {
+      return;
+    }
+
+    // if a forward is requetsed then
+    // send it back to the worker
+    if(message.terminated) {
+      worker.postMessage({"resume": true});
+      if(resumeCallback) {
+        resumeCallback();
+        resumeCallback = null;
+      }
+    } else if(message.forward) {
+      worker.postMessage(message);
+    }
+  }
+  return worker;
+}
+// create workers
+worker = spawnWorker();
+
+// other session and time related values
+sessionKey = null;
+interval = null;
+socket = null;
+statusSocket = null;
+
+// create a new session key
 function newSessionKey() {
   return Array.apply(null, Array(SESSION_KEY_LENGTH)).map(pickRandom).join('');
 }
 
-function terminateWorkers(pool) {
-  // for each in pool, send termination message
-  for(i in pool) {
-    worker = pool[i];
-    if(worker && worker.postMessage) {
-      worker.postMessage({"terminate": true});
-      worker = null;
-    }
-    pool[i] = null;
+// terminate workers via "poison pill"
+function terminateWorkers(callback) {
+  worker.postMessage({"terminate": true});
+  resumeCallback = callback;
+}
+
+function makeWebSocket() {
+  socketType = "ws";
+  if(window.location.href.startsWith("https")) {
+    socketType = "wss";
   }
+  return new WebSocket(socketType + "://" + location.hostname + ":" + location.port + "/ws");
 }
 
-function spawnWorker(pool, script) {
-  worker = new Worker(script);
-  pool.push(worker);
-  return worker;
+// socket that periodically asks
+// for a status update and then pushes the response
+// back to the dispatch method and then waits
+// to send the request again
+function statusWebSocket(sessionKey) {
+  if(statusSocket) {
+    statusSocket.close();
+    statusSocket = null;
+  }
+  socket = makeWebSocket();
+  socket.onopen = function() {
+    socket.send("s" + sessionKey);
+  }
+  socket.onmessage = function(event) {
+    // send status data to event
+    dispatchStatus(event.data);
+    // after status interval, ask for status again
+    timer = window.setTimeout(function() {
+      socket.send("s" + sessionKey);
+    }, STATUS_CHECK_INTERVAL);
+    timers.push(timer);     
+  }
+  statusSocket = socket;
+  return socket;
 }
 
-function spawnDownloaders(sessionKey) {
-  worker = spawnWorker(downloadWorkers, "js/download_worker.js");
-  worker.postMessage({"target": "/data/" + sessionKey, "bytes": START_DOWNLOAD_BYTES, "threads": DOWNLOAD_WORKER_THREADS});
-  return worker;
-}
-
-function spawnUploaders(sessionKey) {
-  worker = spawnWorker(uploadWorkers, "js/upload_worker.js");
-  worker.postMessage({"target": "/upload/" + sessionKey, "threads": UPLOAD_WORKER_THREADS});
-  return worker;
-}
-
-sessionKey = null;
-interval = null;
-socket = null;
+// start test
 function doTest() {
   // do this juuuusssst in case
   reset();
@@ -72,7 +98,7 @@ function doTest() {
   if(window.location.href.startsWith("https")) {
     socketType = "wss";
   }
-  socket = new WebSocket(socketType + "://" + location.hostname + ":" + location.port + "/ws");
+  socket = makeWebSocket();
   startTime = 0;
   endTime = 0;
   pingTimes = [];
@@ -111,68 +137,67 @@ function doTest() {
 
     // chain to download portion
     doTest_Download(sessionKey);
-  }, 5000);
+  }, PING_TEST_INTERVAL * 1000);
   timers.push(timer);
 }
 
 function doTest_Download(sessionKey) {
   // start download test
   console.log("Starting download portion for " + sessionKey)
-  spawnDownloaders(sessionKey);
+  worker.postMessage({"download": true, "sessionKey": sessionKey, "requests": DOWNLOAD_REQUESTS});
 
-  // start status watcher
-  worker = spawnWorker(statusWorkers, "js/status_worker.js");
-  // start process
-  worker.postMessage({"target": "/status/" + sessionKey});
-  // wait for messages and dispatch them back to the event response
-  worker.onmessage = function(event) {
-    if(event.data && event.data.status) {
-      // dispatch status update
-      dispatchStatus(sessionKey, event.data.response);
-    }
-  }
+  // about a half second into the download start status
+  timer = window.setTimeout(function() {
+    statusWebSocket(sessionKey);
+  }, STATUS_DELAY_INTERVAL);
+  timers.push(timer);
 
   // kill downloaders after time interval
   timer = window.setTimeout(function() {
+    clearTimers();
     // handle worker shutdown
     console.log("Stopping downloaders...");
-    terminateWorkers(downloadWorkers);
-
-    // chain to upload portion
-    doTest_Upload(sessionKey);
+    terminateWorkers(function() {
+      // chain to upload portion
+      doTest_Upload(sessionKey);
+    });
   }, DOWNLOAD_TEST_INTERVAL_S * 1000);
   timers.push(timer);
 }
 
 function doTest_Upload(sessionKey) {
+  // start upload test
   console.log("Starting upload portion for " + sessionKey)
-  // start uploaders
-  worker = spawnUploaders(sessionKey);
+  worker.postMessage({"upload": true, "sessionKey": sessionKey, "requests": UPLOAD_REQUESTS});
 
-  // wait until worker actually starts to begin window
-  worker.onmessage = function(event) {
-    // kill uploaders after time interval
-    timer = window.setTimeout(function() {
-      // handle worker shutdown
-      console.log("Stopping uploaders...");
-      terminateWorkers(uploadWorkers);
+  // about a half second into the upload start status
+  timer = window.setTimeout(function() {
+    statusWebSocket(sessionKey);
+  }, STATUS_DELAY_INTERVAL);
+  timers.push(timer);
 
-      // chain to upload portion
-      stopTest(sessionKey);
-    }, DOWNLOAD_TEST_INTERVAL_S * 1000);
-    timers.push(timer);
-
-    // kill status 5% after upload time kill
-    timer = window.setTimeout(function() {
-      // handle worker shutdown
-      console.log("Stopping status...");
-      terminateWorkers(statusWorkers);
-    }, (DOWNLOAD_TEST_INTERVAL_S * 1.05) * 1000);
-    timers.push(timer);
-  }
+  // kill uploaders after time interval
+  timer = window.setTimeout(function() {
+    clearTimers();
+    // handle worker shutdown
+    console.log("Stopping uploaders...");
+    terminateWorkers(function() {
+      // chain to stop test after termination
+      stopTest();
+    });
+  }, DOWNLOAD_TEST_INTERVAL_S * 1000);
+  timers.push(timer);
 }
 
 function stopTest() {
+  // stop all timers
+  clearTimers();
+
+  // close web socket if needed
+  if(statusSocket) {
+    statusSocket.close();
+  }
+
   // clear session from server
   // clearSession(sessionKey); // maybe do this after some time?
   sessionKey = null;
@@ -200,7 +225,7 @@ downloadBytesPerSecondTally = [];
 uploadBytesPerSecondTally = [];
 lastDownloadEnd = 0;
 lastUploadEnd = 0;
-function dispatchStatus(sessionKey, response) {
+function dispatchStatus(response) {
   // bail on null status
   if(!response || response == null || "null" == response || response.startsWith("null")) {
     return;
@@ -239,26 +264,8 @@ function dispatchStatus(sessionKey, response) {
   }
 }
 
-// resets every concievable variable
-// and state of the form and just about
-// anything you can immagine (timers, etc)
-// so that everything can be started again
-function reset() {
-  if(sessionKey) {
-    clearSession(sessionKey);
-    sessionKey = null;
-  }
-
-  // first, terminate workers
-  terminateWorkers(downloadWorkers);
-  terminateWorkers(uploadWorkers);
-  terminateWorkers(statusWorkers);
-
-  // close web socket
-  if(socket) {
-    socket.close();
-  }
-
+// clear recurring timers that have accumulated
+function clearTimers() {
   // stop update interval
   if(interval) {
     window.clearInterval(interval);
@@ -273,6 +280,37 @@ function reset() {
     }
   }
   timers = [];
+}
+
+// resets every concievable variable
+// and state of the form and just about
+// anything you can immagine (timers, etc)
+// so that everything can be started again
+function reset() {
+  // clear any callback
+  resumeCallback = null;
+
+  // remove session key
+  if(sessionKey) {
+    clearSession(sessionKey);
+    sessionKey = null;
+  }
+
+  // clear any timers
+  clearTimers();
+
+  // terminate all worker actions
+  terminateWorkers();
+
+  // close web socket (if not null)
+  if(socket) {
+    socket.close();
+  }
+
+  // close status socket if needed
+  if(statusSocket) {
+    statusSocket.close();
+  }
 
   // clear other values/variables
   downloadBytesPerSecondTally = [];
@@ -302,6 +340,6 @@ function clearSession(sessionKey) {
   xhr = new XMLHttpRequest();
 
   // open url with delete/clear target
-  xhr.open('DELETE', '/clear/' + sessionKey + "?timestamp=" + Date.now(), true);
+  xhr.open('DELETE', CLEAR_TARGET + "/" + sessionKey + "?timestamp=" + Date.now(), true);
   xhr.send();
 }

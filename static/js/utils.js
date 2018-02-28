@@ -36,3 +36,29 @@ POSSIBLE_KEYS_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01234
 function pickRandom() {
     return POSSIBLE_KEYS_CHARS[Math.floor(Math.random() * POSSIBLE_KEYS_CHARS.length)];
 }
+
+// creates a fully randomized binary blob
+function createRandomBlob(length) {
+  // build containing array buffer
+  container = new ArrayBuffer(length);
+  containerView = new Uint32Array(container);
+
+  // holder array
+  holder = new ArrayBuffer(MAX_PROVIDER_ARRAY);
+  bHolder = new Uint32Array(holder);
+
+  index = 0;
+  while(index < containerView.length) {
+    // get random values
+    crypto.getRandomValues(bHolder);
+    for(i in bHolder) {
+      if(index >= containerView.length){
+        break;
+      }
+      containerView[index++] = bHolder[i];
+    }
+  }
+
+  // return array buffer as blob
+  return new Blob(containerView, {"type": "application/octet-stream"});
+}

@@ -5,12 +5,11 @@ import (
 	"flag"
 	"bufio"
 	"encoding/json"
-	"io"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,7 +20,7 @@ import (
 )
 
 // constrain this so people don't go nuts on the server
-const _MAX_DOWNLOAD_BYTES = 24000000
+const _MAX_DOWNLOAD_BYTES = 52000000
 
 // status struct
 type status struct {
@@ -74,7 +73,7 @@ func getSessionStatus(sessionID string, create bool) (*status, bool) {
 	return sessionStatus, errorFinding
 }
 
-func getData(w http.ResponseWriter, r *http.Request) {
+func getDownload(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	sessionID := params["sessionID"]
 
@@ -116,12 +115,10 @@ func getData(w http.ResponseWriter, r *http.Request) {
 		// write byte slice
 		writtenBytes, err := bufW.Write(buffer)
 
-		if writtenBytes > 0 {
-			// count downloaded bytes
-			atomic.AddUint64(&sessionStatus.DownloadByteCount, uint64(writtenBytes))
-			// clock should always be latest value of time
-			atomic.StoreUint64(&sessionStatus.DownloadEnd, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
-		}
+		// count downloaded bytes
+		atomic.AddUint64(&sessionStatus.DownloadByteCount, uint64(writtenBytes))
+		// clock should always be latest value of time
+		atomic.StoreUint64(&sessionStatus.DownloadEnd, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
 
 		// break after final counts if error
 		if err != nil {
@@ -131,7 +128,7 @@ func getData(w http.ResponseWriter, r *http.Request) {
 		// adjust waiting bytes
 		reqBytes -= int64(writtenBytes)
 
-		// fkyst writer
+		// flush writer
 		bufW.Flush()
 	}
 
@@ -148,12 +145,13 @@ func getUpload(w http.ResponseWriter, r *http.Request) {
 	atomic.CompareAndSwapUint64(&sessionStatus.UploadStart, 0, uint64(time.Now().UnixNano()/int64(time.Millisecond)))
 
 	// copy interval because if we just read all the bytes we never get around to updating the session
-	var copyLen int64 = 32000
+	var copyLen int64 = 8000
+	buffer := make([]byte, copyLen)
 
 	// dilligently read and discard everything
 	for true {
-		readBytes, err := io.CopyN(ioutil.Discard, r.Body, copyLen)
-		if readBytes < 1 || err != nil {
+		readBytes, err := r.Body.Read(buffer)
+		if err != nil {
 			break
 		}
 		// count uploaded bytes
@@ -203,16 +201,39 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	go handleWsConn(conn)
 }
 
+func pingResponse(conn *websocket.Conn) {
+	conn.WriteMessage(websocket.TextMessage, []byte("p"))
+}
+
+func statusResponse(message string, conn *websocket.Conn) {
+	// get rest of string to get message id
+	sessionID := message[1:]
+	if sessionStatus, ok := getSessionStatus(sessionID, false); ok {
+		jsonBytes, _ := json.Marshal(sessionStatus)
+		conn.WriteMessage(websocket.TextMessage, jsonBytes)
+	} else {
+		conn.WriteMessage(websocket.TextMessage, []byte("e"))
+	}
+}
+
 func handleWsConn(conn *websocket.Conn) {
 	for {
-		_, _, err := conn.ReadMessage()
+		messageType, p, err := conn.ReadMessage()
 		if err != nil {
 			return
 		}
 
-		//log.Print("got ping from client")
-
-		conn.WriteMessage(websocket.TextMessage, []byte("p"))
+		// check message type
+		if messageType == websocket.TextMessage {
+			message := string(p)
+			if strings.HasPrefix(message, "p") {
+				pingResponse(conn)
+			} else if strings.HasPrefix(message, "s") {
+				statusResponse(message, conn)
+			}
+		} else {
+			conn.WriteMessage(websocket.TextMessage, []byte("e"))
+		}		
 	}
 }
 
@@ -220,18 +241,18 @@ func main() {
 	router := mux.NewRouter()
 
 	// get bytes of data from the server
-	router.HandleFunc("/data/{sessionID}", getData).Methods("GET")
+	router.HandleFunc("/api/download/{sessionID}", getDownload).Methods("GET")
 
 	// send data (which is counted and discarded)
-	router.HandleFunc("/upload/{sessionID}", getUpload).Methods("PUT", "POST")
+	router.HandleFunc("/api/upload/{sessionID}", getUpload).Methods("PUT", "POST")
 
 	// get status of upload/downloads
-	router.HandleFunc("/status/{sessionID}", getStatus).Methods("GET")
+	router.HandleFunc("/api/status/{sessionID}", getStatus).Methods("GET")
 
 	// clear status/session manually
-	router.HandleFunc("/clear/{sessionID}", clearStatus).Methods("DELETE")
+	router.HandleFunc("/api/clear/{sessionID}", clearStatus).Methods("DELETE")
 
-	// websocket for ping/pong connections
+	// websocket for ping/pong and status connections
 	router.HandleFunc("/ws", wsHandler)
 
 	// handle static files, no idea why fileserver doesn't work with the box righ there but it won't so
