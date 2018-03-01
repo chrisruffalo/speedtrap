@@ -277,6 +277,24 @@ func main() {
 	// set host and port
 	hostAndPort := fmt.Sprintf("%s:%d", *host, *port)
 
+	// start session reaper
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+	    for {
+	       select {
+	        case <- ticker.C:
+	        	minute := uint64(60000) // one minute in ms
+	        	now := uint64(time.Now().UnixNano()/int64(time.Millisecond))
+	            for key, value := range statusMap {
+	            	if value != nil && (value.DownloadEnd > 0 && (now - value.DownloadEnd) >= uint64(3 * minute)) || (value.UploadEnd > 0 && (now - value.UploadEnd) >= minute) {
+	            		delete(statusMap, key)
+	            		log.Printf("Reaped expired session %s", key)
+	            	}
+	            }
+	        }
+	    }
+	 }()	
+
 	// log traffic location
 	log.Printf("Serving traffic on %s", hostAndPort)
 

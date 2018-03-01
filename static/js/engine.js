@@ -199,7 +199,8 @@ function stopTest() {
   }
 
   // clear session from server
-  // clearSession(sessionKey); // maybe do this after some time?
+  clearSession(sessionKey);
+  // and from browser
   sessionKey = null;
 
   // fix button state
@@ -220,11 +221,38 @@ function pingUpdate(pingTimes) {
   $("#pingSpan").text(avg.toFixed(4) + "ms");
 }
 
-// keep track for sparklines
-downloadBytesPerSecondTally = [];
-uploadBytesPerSecondTally = [];
-lastDownloadEnd = 0;
-lastUploadEnd = 0;
+// keep track for sparklines and to keep graph from growing after test is over
+viewTracking = {
+ 'downloadBytesPerSecondTally': [],
+ 'downloadEnd': 0,
+ 'uploadBytesPerSecondTally': [],
+ 'uploadEnd': 0
+};
+
+function dispatchToView(prefix, response) {
+  // need valid data before continuing to dispatch values to view
+  if(!response[prefix + 'Count'] || !response[prefix + 'End'] || !response[prefix + 'Start']) {
+    return;
+  }
+
+  // values for response
+  actionCount = response[prefix + 'Count'];
+  actionStart = response[prefix + 'Start'];
+  actionEnd = response[prefix + 'End'];
+
+  // times delivered are in milliseconds
+  bytesPerSecond = Math.floor(actionCount / ((actionEnd - actionStart) / 1000));
+  if(viewTracking[prefix + 'End'] < actionEnd) {
+    viewTracking[prefix + 'BytesPerSecondTally'].push(bytesPerSecond);
+    $("#" + prefix + "ChartSpan").sparkline(viewTracking[prefix + 'BytesPerSecondTally'], sparkOpts);
+  }
+  viewTracking[prefix + 'End'] = actionEnd;
+  humanReadable = humanByteSize(bytesPerSecond, true) + "/s";
+  $("#" + prefix + "Span").text(humanReadable);
+  humanReadableBits = "(" + humanBitSize(bytesPerSecond * 8, true) + "ps)";
+  $("#" + prefix + "BitSpan").text(humanReadableBits);
+}
+
 function dispatchStatus(response) {
   // bail on null status
   if(!response || response == null || "null" == response || response.startsWith("null")) {
@@ -234,34 +262,9 @@ function dispatchStatus(response) {
   // parse rersponse
   response = JSON.parse(response);
 
-  // update elements
-  if(response.downloadStart && response.downloadEnd && response.downloadCount) {
-    // times delivered are in milliseconds
-    bytesPerSecond = Math.floor(response.downloadCount / ((response.downloadEnd - response.downloadStart) / 1000));
-    if(lastDownloadEnd < response.downloadEnd) {
-      downloadBytesPerSecondTally.push(bytesPerSecond);
-      $('#downloadChartSpan').sparkline(downloadBytesPerSecondTally, sparkOpts);
-    }
-    lastDownloadEnd = response.downloadEnd;
-    humanReadable = humanByteSize(bytesPerSecond, true) + "/s";
-    $("#downloadSpan").text(humanReadable);
-    humanReadableBits = "(" + humanBitSize(bytesPerSecond * 8, true) + "ps)";
-    $("#downloadBitSpan").text(humanReadableBits);
-  }
-
-  if(response.uploadStart && response.uploadEnd && response.uploadCount) {
-    // times delivered are in milliseconds
-    bytesPerSecond = Math.floor(response.uploadCount / ((response.uploadEnd - response.uploadStart) / 1000));
-    if(lastUploadEnd < response.uploadEnd) {
-      uploadBytesPerSecondTally.push(bytesPerSecond);
-      $('#uploadChartSpan').sparkline(uploadBytesPerSecondTally, sparkOpts);
-    }
-    lastUploadEnd = response.uploadEnd;
-    humanReadable = humanByteSize(bytesPerSecond, true) + "/s";
-    $("#uploadSpan").text(humanReadable);
-    humanReadableBits = "(" + humanBitSize(bytesPerSecond * 8, true) + "ps)";
-    $("#uploadBitSpan").text(humanReadableBits);
-  }
+  // handle moving response to view
+  dispatchToView("download", response)
+  dispatchToView("upload", response)
 }
 
 // clear recurring timers that have accumulated
@@ -313,10 +316,12 @@ function reset() {
   }
 
   // clear other values/variables
-  downloadBytesPerSecondTally = [];
-  uploadBytesPerSecondTally = []
-  lastDownloadEnd = 0;
-  lastUploadEnd = 0;
+  viewTracking = {
+   'downloadBytesPerSecondTally': [],
+   'downloadEnd': 0,
+   'uploadBytesPerSecondTally': [],
+   'uploadEnd': 0
+  };
 
   // clear display segments
   $('#pingSpan').html("&nbsp;");
