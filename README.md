@@ -47,3 +47,31 @@ Running the container will always bring the service up on the inside on port 800
 ```bash
 []$ docker run -d --name speedtrap -p 8000:8000 chrisruffalo/speedtrap
 ```
+
+## Reverse Proxy
+
+### Apache
+
+To serve Speedtrap through HTTPD a configuration like the following works assuming you are hosting your application on `speedtrap.yourhost.tld` and using port 8000 for the application or for the Docker container:
+
+```
+<VirtualHost *:80>
+    ServerName speedtrap.yourhost.tld
+ 
+ 
+    ProxyPreserveHost On
+    ProxyRequests off
+
+    ProxyPass "/ws/" "ws://localhost:8000/ws/"
+    ProxyPassReverse "/ws/" "ws://localhost:8000/ws/"
+
+    ProxyPass / http://localhost:8000/
+    ProxyPassReverse / http://localhost:8000/
+
+    RewriteEngine on
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule /(.*)  ws://localhost:8000/$1 [P,L]
+    RewriteCond %{HTTP:Upgrade} !=websocket [NC]
+    RewriteRule /(.*)  http://localhost:8000/$1 [P,L]
+</VirtualHost>
+```
