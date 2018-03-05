@@ -12,15 +12,15 @@ The basic program flow follows these steps:
 * Ensure the starting state clear
 * Open a websocket
 * For an ${interval}:
- * push a byte to the server
- * wait for response, divide time by two for average one-way ping
+  * push a byte to the server
+  * wait for response, divide time by two for average one-way ping
 * Start websocket connection to monitor status
 * For an ${interval}:
- * Download progressively larger chunks from the server
- * Status responses update widgets in page
+  * Download progressively larger chunks from the server
+  * Status responses update widgets in page
 * For an ${interval}:
- * Upload chunks to the server
- * Status responses update widgets in page
+  * Upload chunks to the server
+  * Status responses update widgets in page
 * Close websockets and requests
 
 ## Building and Running
